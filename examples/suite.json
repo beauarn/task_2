@@ -1,0 +1,16 @@
+{
+    "tests": [
+        {
+            "name": "Example.com - Page loads correctly",
+            "url": "https://example.com",
+            "test": "Verify the page loads and shows a heading that says 'Example Domain'",
+            "max_steps": 10
+        },
+        {
+            "name": "PHPTravels Demo - Page loads",
+            "url": "https://phptravels.com/demo",
+            "test": "Verify the demo page loads and shows product information or pricing",
+            "max_steps": 15
+        }
+    ]
+}
