@@ -100,6 +100,9 @@ class AIAgent:
         kwargs = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
+            # Groq chat completion API expects string content for text models
+            if "groq.com" in base_url.lower() and "vision" not in model.lower():
+                use_vision = False
         self.client = OpenAI(**kwargs)
         self.model = model
         self.use_vision = use_vision
@@ -151,8 +154,7 @@ class AIAgent:
         except Exception as e:
             err_str = str(e).lower()
             # If the model does not support vision/images, retry with text-only DOM
-            if self.use_vision and any(term in err_str for term in ["image", "vision", "multimodal", "content_type", "unsupported"]):
-                print("\n  [Vision not supported by this model -> switched to text DOM mode]")
+            if self.use_vision and any(term in err_str for term in ["image", "vision", "multimodal", "content_type", "unsupported", "must be a string", "400"]):
                 self.use_vision = False
                 messages[-1]["content"] = user_prompt
                 response = self.client.chat.completions.create(
