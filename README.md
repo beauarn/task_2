@@ -102,7 +102,6 @@ When executed in non-headless mode, the browser stays open after test completion
 ├── run_test.py                  # CLI runner for individual test cases
 ├── run_suite.py                 # Batch runner for test suites
 ├── APPROACH_AND_LIMITATIONS.md  # Detailed technical notes & limitation analysis
-├── RECORDING_SCRIPT.md          # 5-minute walkthrough presentation script
 ├── requirements.txt             # Python dependencies
 ├── .env.example                 # Environment configuration template
 └── .gitignore                   # Secrets and artifact ignore rules
