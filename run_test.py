@@ -27,7 +27,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python run_test.py --url "https://phptravels.com/demo" --test "Verify the demo page loads and shows pricing or product info"
+  python run_test.py --url "https://phptravels.com/demo" --test "Click on Pricing in the navigation and verify the pricing plans are displayed"
   python run_test.py --url "https://example.com" --test "Verify the page title says Example Domain" --headless
         """,
     )
@@ -38,6 +38,7 @@ Examples:
     parser.add_argument("--api-key", default=None, help="API key (default: from OPENAI_API_KEY env var)")
     parser.add_argument("--no-vision", action="store_true", help="Force text-only DOM mode (skip sending screenshots)")
     parser.add_argument("--headless", action="store_true", help="Run browser in headless mode (no visible GUI window)")
+    parser.add_argument("--auto-close", action="store_true", help="Automatically close browser when test ends (by default, kept open until Enter)")
     parser.add_argument("--max-steps", type=int, default=25, help="Maximum actions before timeout (default: 25)")
     parser.add_argument("--output-dir", default="results", help="Directory for screenshots and logs (default: results)")
     args = parser.parse_args()
@@ -69,6 +70,7 @@ Examples:
     print(f"  Base URL:    {base_url or 'https://api.openai.com/v1'}")
     print(f"  Vision Mode: {'Off (DOM only)' if args.no_vision else 'On (Multimodal)'}")
     print(f"  Headless:    {args.headless}")
+    print(f"  Keep Open:   {'No (auto-close)' if (args.headless or args.auto_close) else 'Yes (waits for Enter)'}")
     print(f"  Max Steps:   {args.max_steps}")
     print(f"  Output Dir:  {output_dir}")
     print(f"{'='*65}\n")
@@ -89,7 +91,7 @@ Examples:
         result_file = output_dir / "result.json"
         with open(result_file, "w", encoding="utf-8") as f:
             json.dump(result, f, indent=2, default=str)
-        print(f"  📁 Test artifact saved to: {result_file}\n")
+        print(f"  📁 Test artifact saved to: {result_file}")
 
         return 0 if result["result"] == "pass" else 1
 
@@ -102,6 +104,13 @@ Examples:
         traceback.print_exc()
         return 2
     finally:
+        # Keep browser open until user presses Enter in terminal (unless headless or --auto-close)
+        if not args.headless and not args.auto_close:
+            try:
+                print(f"\n{'─'*65}")
+                input("  ⏸️  Browser kept open for your inspection.\n      👉 Press [Enter] here in the terminal to close the browser... ")
+            except (KeyboardInterrupt, EOFError):
+                pass
         browser.close()
 
 
@@ -166,6 +175,22 @@ def run_test(browser, agent, url, test_case, max_steps, output_dir):
         if action_type == "done":
             result = params.get("result", "fail")
             reason = params.get("reason", "No reason provided")
+
+            # Guard: Prevent premature false passes when test requires physical action
+            action_verbs = ["click", "fill", "type", "submit", "select", "log in", "login", "search", "enter"]
+            requires_action = any(verb in test_case.lower() for verb in action_verbs)
+            if result == "pass" and requires_action and len(history) == 0:
+                print(f"  │  ⚠️ Intercepted premature PASS (no actions were taken yet). Forcing execution...")
+                history.append({
+                    "step": step,
+                    "action": "correction",
+                    "params": {},
+                    "thought": thought,
+                    "success": False,
+                    "message": "REJECTED: You declared pass without taking any action. The test case requires you to interact with the page (click/fill) first.",
+                })
+                continue
+
             browser.save_screenshot(str(output_dir / f"step_{step:02d}_final.png"))
             return {
                 "result": result,
