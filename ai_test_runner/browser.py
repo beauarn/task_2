@@ -17,25 +17,18 @@ EXTRACT_ELEMENTS_JS = """
         el.removeAttribute('data-test-ai-idx');
     });
 
-    const INTERACTIVE_TAGS = new Set([
-        'a', 'button', 'input', 'select', 'textarea', 'option',
-        'details', 'summary', 'dialog'
-    ]);
-    const SEMANTIC_TAGS = new Set([
-        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'label', 'img',
-        'nav', 'main', 'header', 'footer', 'p', 'li', 'td', 'th', 'span'
-    ]);
+    const HIGH_PRIO_TAGS = new Set(['input', 'button', 'select', 'textarea']);
+    const MID_PRIO_TAGS = new Set(['a', 'option', 'details', 'summary']);
+    const SEMANTIC_TAGS = new Set(['h1', 'h2', 'h3', 'label']);
     const INTERACTIVE_ROLES = new Set([
         'button', 'link', 'textbox', 'checkbox', 'radio', 'tab',
-        'menuitem', 'option', 'combobox', 'switch', 'slider',
-        'searchbox', 'spinbutton', 'menu', 'listbox', 'dialog'
+        'menuitem', 'option', 'combobox', 'searchbox'
     ]);
 
-    const elements = [];
-    const allElements = document.querySelectorAll('*');
+    const candidates = [];
+    const all = document.querySelectorAll('*');
 
-    for (const el of allElements) {
-        // Skip hidden elements
+    for (const el of all) {
         try {
             const style = window.getComputedStyle(el);
             if (style.display === 'none' || style.visibility === 'hidden') continue;
@@ -48,74 +41,65 @@ EXTRACT_ELEMENTS_JS = """
         const tag = el.tagName.toLowerCase();
         const role = el.getAttribute('role');
 
-        const isInteractive = INTERACTIVE_TAGS.has(tag)
-            || INTERACTIVE_ROLES.has(role)
-            || el.hasAttribute('onclick')
-            || el.hasAttribute('contenteditable')
-            || (el.hasAttribute('tabindex') && el.getAttribute('tabindex') !== '-1');
+        let priority = 4;
+        if (HIGH_PRIO_TAGS.has(tag) || (role && (role === 'button' || role === 'textbox'))) {
+            priority = 1;
+        } else if (MID_PRIO_TAGS.has(tag) || (role && INTERACTIVE_ROLES.has(role)) || el.hasAttribute('onclick')) {
+            priority = 2;
+        } else if (SEMANTIC_TAGS.has(tag)) {
+            priority = 3;
+        } else {
+            continue;
+        }
 
-        const isSemantic = SEMANTIC_TAGS.has(tag);
+        candidates.push({ el, tag, role, priority });
+    }
 
-        if (!isInteractive && !isSemantic) continue;
+    // Sort by priority so form inputs & buttons get assigned first
+    candidates.sort((a, b) => a.priority - b.priority);
 
-        const directText = getDirectText(el);
-        if (isSemantic && !isInteractive && !directText) continue;
-
-        // Skip excessive text blocks
-        if (isSemantic && !isInteractive && directText.length > 200) continue;
-
+    const elements = [];
+    for (const item of candidates) {
+        const el = item.el;
+        const tag = item.tag;
+        const role = item.role;
         const index = elements.length;
         el.setAttribute('data-test-ai-idx', String(index));
 
         const attrs = {};
-        const attrNames = ['id', 'name', 'class', 'type', 'placeholder', 'href', 'src',
-                          'alt', 'value', 'aria-label', 'title', 'for', 'action', 'method'];
-        for (const attr of attrNames) {
+        for (const attr of ['id', 'name', 'type', 'placeholder', 'value', 'href', 'aria-label']) {
             const val = el.getAttribute(attr);
             if (val && val.trim()) {
-                attrs[attr] = val.trim().substring(0, 100);
+                attrs[attr] = val.trim().substring(0, 40);
             }
         }
 
         if (tag === 'select') {
             const options = [];
             for (const opt of el.options) {
-                options.push(opt.text.trim().substring(0, 50));
+                options.push(opt.text.trim().substring(0, 30));
             }
-            if (options.length > 0) {
-                attrs['options'] = options.slice(0, 20).join(' | ');
-            }
+            if (options.length > 0) attrs['options'] = options.slice(0, 10).join(' | ');
         }
 
         if (el.type === 'checkbox' || el.type === 'radio') {
             attrs['checked'] = el.checked ? 'true' : 'false';
         }
 
+        let text = (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ').substring(0, 50);
+
         elements.push({
             i: index,
             tag: tag,
             role: role || undefined,
-            text: directText.substring(0, 150) || undefined,
+            text: text || undefined,
             attrs: Object.keys(attrs).length > 0 ? attrs : undefined
         });
 
-        if (elements.length >= 150) break;
+        if (elements.length >= 65) break;
     }
 
     return elements;
-
-    function getDirectText(el) {
-        let text = '';
-        for (const node of el.childNodes) {
-            if (node.nodeType === Node.TEXT_NODE) {
-                text += node.textContent;
-            }
-        }
-        if (!text.trim() && el.innerText) {
-            text = el.innerText;
-        }
-        return text.trim().replace(/\\s+/g, ' ');
-    }
 }
 """
 

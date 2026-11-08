@@ -8,6 +8,7 @@ what action to take next to fulfill the plain-English test case.
 
 import json
 import base64
+import time
 from openai import OpenAI
 
 SYSTEM_PROMPT = """You are an expert QA automation agent controlling a web browser. Your job is to execute test cases written in plain English by interacting with web pages step by step.
@@ -65,21 +66,19 @@ Scroll the page up or down.
 Wait for the page to load or update.
 
 ```json
-{"action": "done", "params": {"result": "pass", "reason": "Successfully logged in and verified dashboard is displayed with user name"}}
+{"action": "done", "params": {"result": "pass", "reason": "Successfully verified expected outcome"}}
 ```
 Conclude the test. Result must be "pass" or "fail".
 
 ## Rules
 
 1. **One action per response.** Always return exactly one action as JSON.
-2. **Think before acting.** Include a "thought" field explaining your reasoning.
+2. **Think before acting.** Include a short "thought" field explaining your reasoning.
 3. **Reference elements by index.** Use the [index] from the element list.
-4. **Verify before concluding.** Don't mark "pass" until you've actually verified the expected outcome on the page. Check that the right text, page, or state is visible.
-5. **Handle failures gracefully.** If an action fails, try an alternative approach. Only mark "fail" if the objective is clearly impossible.
-6. **Look for demo/default credentials.** If the test mentions login but doesn't give credentials, look on the page for demo credentials or try common ones (e.g. admin@example.com / password).
-7. **Be concise.** Keep thoughts short and actionable.
-8. **For custom dropdowns** (not <select> tags), click to open first, then click the option.
-9. **Maximum steps.** You have limited steps. Be efficient.
+4. **Verify before concluding.** Don't mark "pass" until you've verified the expected outcome on the page.
+5. **Handle failures gracefully.** If an action fails, try an alternative approach. Only mark "fail" if impossible.
+6. **Be concise.** Keep thoughts short and actionable.
+7. **Maximum steps.** Be efficient.
 
 ## Response Format
 
@@ -100,13 +99,11 @@ class AIAgent:
         kwargs = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
-            # Groq chat completion API expects string content for text models
             if "groq.com" in base_url.lower() and "vision" not in model.lower():
                 use_vision = False
         self.client = OpenAI(**kwargs)
         self.model = model
         self.use_vision = use_vision
-        self.conversation = []  # Running conversation for context
 
     def decide_action(self, test_case: str, page_state: dict, screenshot_b64: str, history: list) -> dict:
         """
@@ -138,56 +135,59 @@ class AIAgent:
         else:
             content = user_prompt
 
+        # Self-contained prompt:
+        # History is already summarized in user_prompt under ## ACTION HISTORY.
+        # Keeping messages stateless prevents exponential token accumulation across steps.
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            *self.conversation,
             {"role": "user", "content": content}
         ]
 
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.1,
-                max_tokens=1000,
-            )
-        except Exception as e:
-            err_str = str(e).lower()
-            # If the model does not support vision/images, retry with text-only DOM
-            if self.use_vision and any(term in err_str for term in ["image", "vision", "multimodal", "content_type", "unsupported", "must be a string", "400"]):
-                self.use_vision = False
-                messages[-1]["content"] = user_prompt
+        raw_response = self._call_llm_with_retry(messages, user_prompt)
+        return self._parse_response(raw_response)
+
+    def _call_llm_with_retry(self, messages: list, user_prompt: str, max_retries: int = 3) -> str:
+        """Call LLM with fallback for vision and retry on rate-limits (TPM/RPM)."""
+        for attempt in range(max_retries):
+            try:
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     temperature=0.1,
-                    max_tokens=1000,
+                    max_tokens=800,
                 )
-            else:
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                err_str = str(e).lower()
+
+                # If vision not supported, switch to text-only DOM immediately
+                if self.use_vision and any(term in err_str for term in ["image", "vision", "multimodal", "content_type", "unsupported", "must be a string", "400"]):
+                    self.use_vision = False
+                    messages[-1]["content"] = user_prompt
+                    continue
+
+                # If rate-limited (413 or 429), wait and retry
+                if any(term in err_str for term in ["413", "429", "rate limit", "too large", "tpm", "rpm"]):
+                    if attempt < max_retries - 1:
+                        wait_sec = 4 * (attempt + 1)
+                        print(f" [Rate limit hit, waiting {wait_sec}s before retry...]", end="", flush=True)
+                        time.sleep(wait_sec)
+                        continue
+
                 raise
 
-        raw_response = response.choices[0].message.content.strip()
-
-        # Track conversation history (text only to conserve tokens)
-        self.conversation.append({"role": "user", "content": user_prompt})
-        self.conversation.append({"role": "assistant", "content": raw_response})
-
-        # Keep last 16 turns
-        if len(self.conversation) > 16:
-            self.conversation = self.conversation[-16:]
-
-        return self._parse_response(raw_response)
+        raise RuntimeError("Failed to get response from AI after retries")
 
     def _build_prompt(self, test_case: str, page_state: dict, history: list) -> str:
-        """Build the user prompt with current page state."""
+        """Build the user prompt with current page state and action history."""
         elements_text = self._format_elements(page_state.get("elements", []))
 
         history_text = "None yet."
         if history:
             steps = []
-            for h in history[-8:]:  # Last 8 steps
+            for h in history[-6:]:  # Keep last 6 actions
                 status = "PASS" if h.get("success") else "FAIL"
-                steps.append(f"  Step {h['step']}: {h['action']} {h.get('params', {})} -> {status} ({h.get('message', '')})")
+                steps.append(f"  Step {h['step']}: {h['action']} {h.get('params', {})} -> {status}")
             history_text = "\n".join(steps)
 
         return f"""## TEST CASE
@@ -206,7 +206,7 @@ class AIAgent:
 What is your next action? Respond with valid JSON only: {{"thought": "...", "action": "...", "params": {{...}}}}"""
 
     def _format_elements(self, elements: list) -> str:
-        """Format elements list into a readable string for the AI."""
+        """Format elements list into a compact readable string for the AI."""
         if not elements:
             return "(No interactive elements found)"
 
@@ -218,14 +218,14 @@ What is your next action? Respond with valid JSON only: {{"thought": "...", "act
                 parts.append(f'role="{el["role"]}"')
 
             attrs = el.get("attrs") or {}
-            for key in ["type", "name", "placeholder", "aria-label", "href", "id", "title", "for", "value"]:
+            for key in ["type", "name", "placeholder", "aria-label", "href", "id", "value"]:
                 if key in attrs and attrs[key]:
-                    val = str(attrs[key])[:80]
+                    val = str(attrs[key])[:35]
                     parts.append(f'{key}="{val}"')
 
             text = el.get("text", "")
             if text:
-                clean_text = " ".join(text.split())[:80]
+                clean_text = " ".join(text.split())[:35]
                 parts.append(f'text="{clean_text}"')
 
             lines.append(" ".join(parts))
