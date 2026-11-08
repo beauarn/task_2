@@ -1,12 +1,3 @@
-#!/usr/bin/env python3
-"""
-Run a suite of test cases from a JSON file.
-
-Usage:
-    python run_suite.py --suite examples/suite.json
-    python run_suite.py --suite examples/suite.json --headless
-"""
-
 import argparse
 import json
 import os
@@ -20,7 +11,6 @@ from dotenv import load_dotenv
 from ai_test_runner.browser import BrowserController
 from ai_test_runner.agent import AIAgent
 from run_test import run_test
-
 
 def main():
     parser = argparse.ArgumentParser(description="Run a suite of AI-powered test cases")
@@ -37,13 +27,12 @@ def main():
 
     api_key = args.api_key or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        print("\n  ❌ OPENAI_API_KEY not set. See .env.example\n")
+        print("\n  ERROR: OPENAI_API_KEY not set. See .env.example\n")
         sys.exit(1)
 
     model = args.model or os.getenv("OPENAI_MODEL", "gpt-4o")
     base_url = args.base_url or os.getenv("OPENAI_BASE_URL")
 
-    # Load suite
     with open(args.suite, "r", encoding="utf-8") as f:
         suite = json.load(f)
 
@@ -57,7 +46,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'='*65}")
-    print(f"  🤖 AI TEST SUITE RUNNER")
+    print(f"  AI TEST SUITE RUNNER")
     print(f"{'='*65}")
     print(f"  Suite:       {args.suite}")
     print(f"  Tests:       {len(test_cases)}")
@@ -77,7 +66,7 @@ def main():
         max_steps = tc.get("max_steps", 25)
 
         print(f"\n{'─'*65}")
-        print(f"  📋 [{i}/{len(test_cases)}] {name}")
+        print(f"  [{i}/{len(test_cases)}] {name}")
         print(f"     URL:  {url}")
         print(f"     Test: {test}")
         print(f"{'─'*65}")
@@ -103,33 +92,30 @@ def main():
         result["name"] = name
         results.append(result)
 
-        status = "✅ PASS" if result["result"] == "pass" else "❌ FAIL"
-        print(f"\n  {status}: {result.get('reason', '')[:80]}")
+        status = "PASS" if result["result"] == "pass" else "FAIL"
+        print(f"\n  [{status}] {result.get('reason', '')[:80]}")
 
-    # Summary
     passed = sum(1 for r in results if r["result"] == "pass")
     failed = len(results) - passed
 
     print(f"\n\n{'='*65}")
-    print(f"  📊 SUITE RESULTS")
+    print(f"  SUITE RESULTS")
     print(f"{'='*65}")
     print(f"  Total:   {len(results)}")
-    print(f"  Passed:  {passed} ✅")
-    print(f"  Failed:  {failed} ❌")
+    print(f"  Passed:  {passed}")
+    print(f"  Failed:  {failed}")
     print(f"{'='*65}")
 
     for r in results:
-        icon = "✅" if r["result"] == "pass" else "❌"
-        print(f"  {icon} {r.get('name', '?')}: {r.get('reason', '')[:60]}")
+        status = "PASS" if r["result"] == "pass" else "FAIL"
+        print(f"  [{status}] {r.get('name', '?')}: {r.get('reason', '')[:60]}")
 
-    print(f"\n  📁 Results: {output_dir}\n")
+    print(f"\n  Results saved to: {output_dir}\n")
 
-    # Save summary
     with open(output_dir / "summary.json", "w", encoding="utf-8") as f:
         json.dump({"passed": passed, "failed": failed, "results": results}, f, indent=2, default=str)
 
     return 0 if failed == 0 else 1
-
 
 if __name__ == "__main__":
     sys.exit(main())

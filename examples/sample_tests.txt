@@ -1,29 +1,6 @@
-# Sample Test Cases for AI Test Runner
-# Run any of these using:
-# python run_test.py --url "<URL>" --test "<TEST_CASE>"
-
-# ─────────────────────────────────────────────────────────────
-# 1. PHPTravels Demo Site (Target Site for Task 2)
-# ─────────────────────────────────────────────────────────────
-
-# Test 1: Navigation to pricing
 python run_test.py --url "https://phptravels.com/demo" --test "Click on Pricing in the navigation and verify the pricing plans are displayed"
-
-# Test 2: Demo page verification
 python run_test.py --url "https://phptravels.com/demo" --test "Verify the demo page loads and contains links to live demo and documentation"
-
-# Test 3: Sign-in link check
 python run_test.py --url "https://phptravels.com/demo" --test "Find the Sign in link and click it, then verify that the login page opens"
-
-# ─────────────────────────────────────────────────────────────
-# 2. General / Cross-Site Verification (Proves no hardcoding)
-# ─────────────────────────────────────────────────────────────
-
-# Test 4: Example Domain
 python run_test.py --url "https://example.com" --test "Verify the page title says Example Domain and click Learn more"
-
-# Test 5: Wikipedia Search
 python run_test.py --url "https://en.wikipedia.org" --test "Search for 'Python programming' in the search bar and verify the Python page is displayed"
-
-# Test 6: CloudQA Form (from Task 1)
 python run_test.py --url "https://app.cloudqa.io/home/AutomationPracticeForm" --test "Fill in First Name with 'Kartik' and select Female as gender"

@@ -1,228 +1,269 @@
-# AI Test Runner
+# Autonomous Browser QA Agent (Task 2)
 
-> Turn plain-English test cases into automated browser tests, powered by AI.
-
-**AI Test Runner** takes a test case written in natural language — like *"Log in as a customer and verify the dashboard is shown"* — and executes it automatically in a real browser. It observes the page, decides what to do next, performs the action, and reports whether the test passed or failed.
+An autonomous, multi-provider AI test runner that turns plain-English test descriptions into fully executed browser tests using Playwright and Large Language Models.
 
 ---
 
-## How It Works
+## Overview
 
-```
-┌──────────────┐     ┌───────────────┐     ┌──────────────┐
-│  Plain-English│────▶│   AI Agent    │────▶│   Browser    │
-│  Test Case    │     │  (GPT-4o)    │     │ (Playwright) │
-└──────────────┘     └───────┬───────┘     └──────┬───────┘
-                             │                     │
-                             │   "click [5]"       │
-                             │────────────────────▶│
-                             │                     │
-                             │◀────────────────────│
-                             │  new page state +   │
-                             │  screenshot         │
-                             │                     │
-                             │  ... repeat ...     │
-                             │                     │
-                     ┌───────▼───────┐             │
-                     │  ✅ PASS or   │             │
-                     │  ❌ FAIL      │             │
-                     └───────────────┘
-```
+Traditional test automation frameworks rely on brittle, hardcoded CSS selectors or XPath expressions that break whenever layouts shift, IDs change, or components are refactored.
 
-**Step-by-step:**
+This solution implements a closed-loop **autonomous browser agent**:
+1. It ingests an arbitrary test objective written in plain natural language (e.g., *"Click on Pricing in the navigation and verify the pricing plans are displayed"*).
+2. It perceives the live browser page state using both **spatial screenshots** and a **dynamically indexed semantic DOM tree**.
+3. It reasons turn-by-turn to plan and execute actions (clicks, inputs, selections, navigation) using multi-tier defensive fallbacks.
+4. It halts only when the test objective is verified, emitting visual audit screenshots and structured JSON test results.
 
-1. The tool launches a Chromium browser and navigates to the target URL
-2. It extracts all interactive elements from the page (buttons, links, inputs, etc.) and takes a screenshot
-3. Both the element list and the screenshot are sent to GPT-4o along with the test case
-4. The AI decides the next action (click, type, navigate, scroll, etc.)
-5. The tool executes that action in the browser
-6. Steps 2–5 repeat until the AI concludes the test as **PASS** or **FAIL**
-7. Screenshots are saved for every step, creating a visual record
-
-## Quick Start
-
-### 1. Prerequisites
-
-- **Python 3.9+**
-- **An OpenAI API key** with access to `gpt-4o` (or another vision-capable model)
-
-### 2. Install
-
-```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/ai-test-runner.git
-cd ai-test-runner
-
-# Create a virtual environment (recommended)
-python -m venv venv
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # macOS/Linux
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Install Playwright browsers
-playwright install chromium
-```
-
-### 3. Configure
-
-```bash
-# Copy the example env file
-copy .env.example .env       # Windows
-# cp .env.example .env       # macOS/Linux
-
-# Edit .env and add your OpenAI API key
-```
-
-Your `.env` file should contain:
-```
-OPENAI_API_KEY=sk-your-actual-key-here
-OPENAI_MODEL=gpt-4o
-```
-
-### 4. Run
-
-```bash
-python run_test.py \
-  --url "https://phptravels.com/demo" \
-  --test "Verify the demo page loads and shows pricing or product information"
-```
-
-## Usage
-
-```
-python run_test.py --url <URL> --test <TEST_CASE> [OPTIONS]
-```
-
-| Argument       | Required | Description                                       |
-|----------------|----------|---------------------------------------------------|
-| `--url`        | Yes      | Starting URL for the test                         |
-| `--test`       | Yes      | Test case in plain English                        |
-| `--model`      | No       | AI model to use (default: from `.env` or `gpt-4o`)|
-| `--headless`   | No       | Run browser without a visible window              |
-| `--max-steps`  | No       | Max actions before timeout (default: 25)          |
-| `--output-dir` | No       | Where to save screenshots and logs (default: `results`) |
-
-### Examples
-
-```bash
-# Verify a page loads correctly
-python run_test.py \
-  --url "https://example.com" \
-  --test "Verify the page shows a heading that says 'Example Domain'"
-
-# Test a login flow
-python run_test.py \
-  --url "https://demo-site.com/login" \
-  --test "Log in with email 'user@test.com' and password 'pass123', then verify the dashboard loads"
-
-# Run headless (no browser window)
-python run_test.py \
-  --url "https://phptravels.com/demo" \
-  --test "Check that the page displays travel-related content" \
-  --headless
-```
-
-## Output
-
-Each test run creates a timestamped folder in `results/` containing:
-
-```
-results/
-└── 20241107_143022/
-    ├── step_00_initial.png     # Initial page load
-    ├── step_01.png             # After step 1
-    ├── step_02.png             # After step 2
-    ├── ...
-    ├── step_05_final.png       # Final state
-    └── result.json             # Structured test result
-```
-
-The `result.json` includes the verdict, reasoning, and full action history:
-
-```json
-{
-  "result": "pass",
-  "reason": "Successfully verified the dashboard displays the user's name and recent activity",
-  "steps_taken": 4,
-  "test_case": "Log in and verify the dashboard is shown",
-  "url": "https://demo-site.com",
-  "history": [...]
-}
-```
+---
 
 ## Architecture
 
 ```
-ai_test_runner/
-├── __init__.py
-├── agent.py         # AI agent: sends page state to GPT-4o, gets next action
-└── browser.py       # Browser controller: Playwright wrapper + DOM extraction
+ ┌────────────────────────────────────────────────────────┐
+ │                   AGENTIC CONTROL LOOP                 │
+ └──────────────────────────┬─────────────────────────────┘
+                            │
+               1. Launch & Navigate (Playwright)
+                            │
+                            ▼
+ ┌────────────────────────────────────────────────────────┐
+ │                   PAGE PERCEPTION                      │
+ │  • Inject client-side JS DOM indexer                   │
+ │  • Priority classification: forms & buttons first      │
+ │  • Ephemeral element stamps: [data-test-ai-idx="N"]    │
+ │  • Viewport screenshot capture (multimodal grounding)  │
+ └──────────────────────────┬─────────────────────────────┘
+                            │
+               2. Structured State + Action History
+                            │
+                            ▼
+ ┌────────────────────────────────────────────────────────┐
+ │                  REASONING ENGINE                      │
+ │  • LLM Inference (OpenAI / Groq / Gemini / Ollama)     │
+ │  • Chain-of-thought evaluation                         │
+ │  • Anti-premature-pass guardrails                      │
+ │  • Structured JSON action: {"action": "...", ...}      │
+ └──────────────────────────┬─────────────────────────────┘
+                            │
+               3. Resilient Action Dispatch
+                            │
+                            ▼
+ ┌────────────────────────────────────────────────────────┐
+ │                 BROWSER DISPATCHER                     │
+ │  • Primary: Playwright native locator action           │
+ │  • Fallback 1: Force action (bypasses overlays)        │
+ │  • Fallback 2: Direct JavaScript DOM event dispatch    │
+ │  • Automatic multi-tab / popup window tracking         │
+ └──────────────────────────┬─────────────────────────────┘
+                            │
+                            ▼
+                Test Objective Complete?
+               ├── No  ──▶ Repeat Loop
+               └── Yes ──▶ Save Artifacts & Report PASS/FAIL
 ```
 
-| Component           | Responsibility                                                   |
-|---------------------|------------------------------------------------------------------|
-| **`run_test.py`**   | CLI entry point, orchestrates the test loop                     |
-| **`agent.py`**      | Communicates with GPT-4o; builds prompts, parses action responses |
-| **`browser.py`**    | Manages Playwright browser; extracts DOM elements; executes actions |
+---
 
-### Key Design Decisions
+## Key Engineering Innovations
 
-- **DOM extraction + screenshots**: The AI gets *both* a structured list of interactive elements (with indices) *and* a visual screenshot. The DOM list enables precise element targeting; the screenshot provides visual context for layout understanding.
-- **Element indexing**: Each interactive element is assigned a `data-test-ai-idx` attribute. The AI references elements by index, and the browser targets them via `[data-test-ai-idx="N"]`. This is more reliable than generating CSS/XPath selectors.
-- **Conversation memory**: The agent maintains a rolling conversation history so it can reference earlier actions and adapt its strategy.
-- **Low-temperature generation**: `temperature=0.1` for consistent, deterministic actions.
+### 1. Index-Based Dynamic Grounding
+Instead of asking the LLM to invent fragile XPath or CSS selectors on the fly, a lightweight in-page JavaScript crawler assigns temporary integer indices (`data-test-ai-idx="0"`, `"1"`, ...) to all interactive elements. The AI returns an exact element index, making interaction 100% deterministic.
 
-## Approach & Limitations
+### 2. Token-Optimized Perception
+Enterprise pages often have thousands of DOM nodes that exceed token limits. The crawler prioritizes high-value form inputs and buttons first, truncates verbose text, and caps the payload at ~65 elements (~650 tokens per step). This prevents rate limits while preserving complete actionable state.
 
-### Approach
+### 3. Anti-Hallucination & Verification Guardrails
+- **Anti-Premature Pass Guard:** If a test case requires interaction (`click`, `fill`, `submit`), the runner programmatically intercepts and rejects any `done: pass` emitted before physical actions occur.
+- **Form Completeness:** Forces the agent to step through all relevant form fields before declaring completion.
+- **Two-Turn Outcome Verification:** Actions (like form submission) must be verified on the subsequent turn by inspecting confirmation messages or destination URLs.
 
-This tool implements an **agentic loop** pattern: the AI observes the page state, reasons about what to do, takes one action, and observes the result. This mirrors how a human tester would work — look at the page, decide what to click, check what happened.
+### 4. Resilient Action Fallbacks
+Real-world sites feature floating headers and dynamic overlays. If a standard Playwright action fails, the runner automatically escalates to a forced action, and finally to a direct JavaScript event dispatch (`el.dispatchEvent(new Event('input'))`).
 
-The combination of **structured DOM data** (for precise element identification) and **visual screenshots** (for layout understanding) gives the AI a rich understanding of the page, making it effective across different websites without any site-specific configuration.
+### 5. Multi-Tab Awareness
+Automatically detects when links open in new tabs (`target="_blank"`) and shifts active execution to the newest page context.
 
-### Limitations
+### 6. Interactive Inspection Pause
+When executed in non-headless mode, the browser stays open after test completion so the tester can inspect the page state. Pressing `Enter` in the terminal cleanly shuts down the session.
 
-1. **API cost**: Each step makes a GPT-4o API call with an image. A 10-step test costs roughly $0.05–0.15 depending on page complexity.
-2. **Speed**: Each step takes 2–5 seconds (mostly API latency). A full test typically takes 30–90 seconds.
-3. **Complex multi-page flows**: Very long test scenarios (10+ steps) may occasionally lose context or get confused. Breaking them into smaller test cases helps.
-4. **iframes**: The DOM extractor currently operates on the main frame only. Content inside iframes is not extracted.
-5. **File uploads & native dialogs**: Browser-native dialogs (file picker, print dialog, alerts) are not currently handled.
-6. **Highly dynamic SPAs**: Pages with rapid DOM updates or heavy animations may cause stale element indices between extraction and action.
-7. **CAPTCHA / anti-bot**: Cannot bypass CAPTCHAs or bot detection (by design).
-8. **AI judgment**: The AI may occasionally misinterpret ambiguous test cases or make wrong assertions. Writing clear, specific test cases improves reliability.
+---
 
-### Future Improvements
+## Project Structure
 
-- **Multi-model support**: Add Gemini, Claude, or local models as alternatives to OpenAI
-- **Parallel test execution**: Run multiple test cases concurrently
-- **Retry logic**: Automatically retry failed actions before giving up
-- **HTML report generation**: Generate visual HTML reports with embedded screenshots
-- **iframe support**: Extract and interact with iframe content
+```
+.
+├── ai_test_runner/
+│   ├── __init__.py
+│   ├── agent.py                 # Multi-provider reasoning agent & prompt engine
+│   └── browser.py               # Playwright controller & resilient DOM crawler
+├── examples/
+│   ├── sample_tests.txt         # Pre-configured test cases
+│   └── suite.json               # Batch test suite definition
+├── run_test.py                  # CLI runner for individual test cases
+├── run_suite.py                 # Batch runner for test suites
+├── APPROACH_AND_LIMITATIONS.md  # Detailed technical notes & limitation analysis
+├── RECORDING_SCRIPT.md          # 5-minute walkthrough presentation script
+├── requirements.txt             # Python dependencies
+├── .env.example                 # Environment configuration template
+└── .gitignore                   # Secrets and artifact ignore rules
+```
 
-## Running Multiple Test Cases
+---
 
-Use `run_suite.py` to run a batch of test cases from a JSON file:
+## Installation & Setup
+
+### 1. Prerequisites
+- Python 3.9+
+- An API key for your chosen LLM provider (OpenAI, Groq, Google Gemini, or a local Ollama instance)
+
+### 2. Clone Repository
+```bash
+git clone https://github.com/beauarn/task_2.git
+cd task_2
+```
+
+### 3. Install Dependencies & Playwright Browser
+```bash
+pip install -r requirements.txt
+python -m playwright install chromium
+```
+
+### 4. Configure Environment
+Copy the example environment file:
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your preferred configuration:
+
+**For Groq (Default / High Speed):**
+```env
+OPENAI_API_KEY=gsk_your_groq_key_here
+OPENAI_BASE_URL=https://api.groq.com/openai/v1
+OPENAI_MODEL=openai/gpt-oss-120b
+```
+
+**For OpenAI:**
+```env
+OPENAI_API_KEY=sk-your_openai_key_here
+OPENAI_MODEL=gpt-4o
+OPENAI_BASE_URL=
+```
+
+---
+
+## Usage
+
+### Single Test Execution
+
+Run a plain-English test against any website:
 
 ```bash
-python run_suite.py --suite examples/suite.json
+python run_test.py \
+  --url "https://phptravels.com/demo" \
+  --test "Click on Pricing in the navigation and verify the pricing plans are displayed"
 ```
 
-Suite file format (`suite.json`):
+### Headless Mode (CI / Background)
+
+Run tests silently without spawning a visible browser window:
+
+```bash
+python run_test.py \
+  --url "https://phptravels.com/demo" \
+  --test "Verify the demo page loads and contains links to live demo" \
+  --headless
+```
+
+### Form Filling Test
+
+```bash
+python run_test.py \
+  --url "https://phptravels.com/demo" \
+  --test "fill the form by the name of kartik and other gibberish values"
+```
+
+### Batch Suite Execution
+
+Execute an entire test suite defined in JSON:
+
+```bash
+python run_suite.py --suite examples/suite.json --headless
+```
+
+---
+
+## CLI Options Reference
+
+| Argument | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--url` | String | *Required* | Starting URL for the test session |
+| `--test` | String | *Required* | Test case description written in plain English |
+| `--model` | String | `.env` / `gpt-4o` | LLM model identifier |
+| `--base-url` | String | `.env` / OpenAI | Custom API endpoint (Groq, Ollama, Gemini) |
+| `--api-key` | String | `OPENAI_API_KEY` | Provider API authentication key |
+| `--no-vision` | Flag | `False` | Force text-only DOM mode (skips screenshots) |
+| `--headless` | Flag | `False` | Run browser in headless mode (no GUI window) |
+| `--auto-close` | Flag | `False` | Skip terminal pause and close browser automatically |
+| `--max-steps` | Integer | `25` | Step budget before safety timeout |
+| `--output-dir` | String | `results` | Output directory for audit screenshots and JSON logs |
+
+---
+
+## Test Artifacts & Audit Logs
+
+Every test run generates a timestamped directory inside `results/`:
+
+```
+results/
+└── 20261109_031455/
+    ├── step_00_initial.png      # Baseline page load screenshot
+    ├── step_01.png              # State after action 1
+    ├── step_02.png              # State after action 2
+    ├── step_08_final.png        # Final verification screenshot
+    └── result.json              # Machine-readable test execution report
+```
+
+### Structured Output Schema (`result.json`)
 ```json
 {
-    "tests": [
-        {
-            "name": "Homepage loads",
-            "url": "https://example.com",
-            "test": "Verify the page shows a heading",
-            "max_steps": 10
-        }
-    ]
+  "result": "pass",
+  "reason": "All form fields filled with values and submitted successfully",
+  "steps_taken": 8,
+  "test_case": "fill the form by the name of kartik and other gibberish values",
+  "url": "https://phptravels.com/demo",
+  "history": [
+    {
+      "step": 1,
+      "action": "fill",
+      "params": {"index": 7, "text": "kartik"},
+      "thought": "Start filling the form: first fill the First Name field with 'kartik'",
+      "success": true,
+      "message": "Filled element [7] with 'kartik'"
+    }
+  ]
 }
 ```
 
+---
+
+## Verified Test Benchmarks
+
+| Target Application | Test Scenario | Steps | Verdict |
+| :--- | :--- | :---: | :---: |
+| `phptravels.com/demo` | Navigation to Pricing & plan tier verification | 2 | **PASS** |
+| `phptravels.com/demo` | Multi-field form completion & submission | 8 | **PASS** |
+| `example.com` | Title verification & documentation link click | 1 | **PASS** |
+| `example.com` | Negative test: Nonexistent button verification | 1 | **FAIL (Expected)** |
+
+---
+
+## Limitations
+
+For a full discussion on trade-offs, token costs, iframe encapsulation, and CAPTCHA boundaries, refer to [`APPROACH_AND_LIMITATIONS.md`](APPROACH_AND_LIMITATIONS.md).
+
+---
+
 ## License
 
-MIT
+MIT License. Open source for interview evaluation and commercial adaptation.

@@ -1,18 +1,9 @@
-"""
-Browser Controller - Playwright wrapper for browser automation.
-
-Handles launching the browser, navigating pages, extracting DOM elements,
-taking screenshots, handling multi-tab / popups, and executing robust actions.
-"""
-
 import base64
 import time
 from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext
 
-
 EXTRACT_ELEMENTS_JS = """
 () => {
-    // Remove stale indices from previous extraction
     document.querySelectorAll('[data-test-ai-idx]').forEach(el => {
         el.removeAttribute('data-test-ai-idx');
     });
@@ -55,7 +46,6 @@ EXTRACT_ELEMENTS_JS = """
         candidates.push({ el, tag, role, priority });
     }
 
-    // Sort by priority so form inputs & buttons get assigned first
     candidates.sort((a, b) => a.priority - b.priority);
 
     const elements = [];
@@ -103,10 +93,7 @@ EXTRACT_ELEMENTS_JS = """
 }
 """
 
-
 class BrowserController:
-    """Controls a Playwright browser instance for test automation."""
-
     def __init__(self, headless: bool = False, timeout: int = 15000):
         self.headless = headless
         self.timeout = timeout
@@ -116,7 +103,6 @@ class BrowserController:
         self._page: Page = None
 
     def launch(self):
-        """Launch the browser."""
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(
             headless=self.headless,
@@ -130,13 +116,11 @@ class BrowserController:
                 "Chrome/124.0.0.0 Safari/537.36"
             )
         )
-        # Automatically switch to any popup / new tab opened by links
         self._context.on("page", self._on_new_page)
         self._page = self._context.new_page()
         self._page.set_default_timeout(self.timeout)
 
     def _on_new_page(self, new_page: Page):
-        """Handle new tab/window popups."""
         try:
             new_page.wait_for_load_state("domcontentloaded", timeout=5000)
         except Exception:
@@ -145,7 +129,6 @@ class BrowserController:
         self._page.set_default_timeout(self.timeout)
 
     def _ensure_active_page(self):
-        """Ensure self._page points to the latest valid page."""
         if not self._context:
             return
         pages = self._context.pages
@@ -157,7 +140,6 @@ class BrowserController:
             self._page.set_default_timeout(self.timeout)
 
     def navigate(self, url: str):
-        """Navigate to a URL."""
         self._ensure_active_page()
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
@@ -165,11 +147,10 @@ class BrowserController:
         self._page.wait_for_timeout(1500)
 
     def get_page_state(self) -> dict:
-        """Extract the current page state: URL, title, and interactive elements."""
         self._ensure_active_page()
         try:
             elements = self._page.evaluate(EXTRACT_ELEMENTS_JS)
-        except Exception as e:
+        except Exception:
             elements = []
 
         try:
@@ -186,7 +167,6 @@ class BrowserController:
         }
 
     def take_screenshot_b64(self) -> str:
-        """Take a screenshot and return as base64-encoded PNG."""
         self._ensure_active_page()
         try:
             screenshot_bytes = self._page.screenshot(type="png")
@@ -195,7 +175,6 @@ class BrowserController:
             return ""
 
     def save_screenshot(self, path: str):
-        """Save a screenshot to disk."""
         self._ensure_active_page()
         try:
             self._page.screenshot(path=path, type="png")
@@ -203,7 +182,6 @@ class BrowserController:
             pass
 
     def click_element(self, index: int):
-        """Click the element with the given AI index, with fallbacks."""
         self._ensure_active_page()
         selector = f'[data-test-ai-idx="{index}"]'
         locator = self._page.locator(selector).first
@@ -212,17 +190,14 @@ class BrowserController:
             locator.click(timeout=self.timeout)
         except Exception:
             try:
-                # Fallback 1: force click
                 locator.click(force=True, timeout=5000)
             except Exception:
-                # Fallback 2: JS click directly in page
                 locator.evaluate("el => el.click()")
 
         self._page.wait_for_timeout(1000)
         self._ensure_active_page()
 
     def fill_element(self, index: int, text: str):
-        """Clear and type text into an input element with fallbacks."""
         self._ensure_active_page()
         selector = f'[data-test-ai-idx="{index}"]'
         locator = self._page.locator(selector).first
@@ -243,7 +218,6 @@ class BrowserController:
         self._page.wait_for_timeout(500)
 
     def select_option(self, index: int, option: str):
-        """Select an option from a <select> element by visible text or value."""
         self._ensure_active_page()
         selector = f'[data-test-ai-idx="{index}"]'
         locator = self._page.locator(selector).first
@@ -254,7 +228,6 @@ class BrowserController:
             try:
                 locator.select_option(value=option, timeout=5000)
             except Exception:
-                # Select first matching option via JS
                 locator.evaluate("""(el, opt) => {
                     for (let o of el.options) {
                         if (o.text.includes(opt) || o.value.includes(opt)) {
@@ -267,27 +240,23 @@ class BrowserController:
         self._page.wait_for_timeout(500)
 
     def hover_element(self, index: int):
-        """Hover over an element."""
         self._ensure_active_page()
         selector = f'[data-test-ai-idx="{index}"]'
         self._page.locator(selector).first.hover(timeout=self.timeout)
         self._page.wait_for_timeout(500)
 
     def press_key(self, key: str):
-        """Press a keyboard key."""
         self._ensure_active_page()
         self._page.keyboard.press(key)
         self._page.wait_for_timeout(500)
 
     def scroll(self, direction: str = "down"):
-        """Scroll the page up or down."""
         self._ensure_active_page()
         delta = 600 if direction == "down" else -600
         self._page.mouse.wheel(0, delta)
         self._page.wait_for_timeout(800)
 
     def close(self):
-        """Close the browser and cleanup."""
         try:
             if self._context:
                 self._context.close()

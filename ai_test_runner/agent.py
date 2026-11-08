@@ -1,11 +1,3 @@
-"""
-AI Agent - Interfaces with OpenAI, Groq, Ollama, Gemini or any OpenAI-compatible API
-to interpret plain-English test cases and decide actions.
-
-The agent receives the current page state (DOM elements + screenshot) and decides
-what action to take next to fulfill the plain-English test case.
-"""
-
 import json
 import base64
 import time
@@ -74,27 +66,27 @@ Conclude the test as "pass" or "fail".
 
 ## CRITICAL RULES TO PREVENT FALSE PASSES (STRICT ENFORCEMENT)
 
-1. **NEVER DECLARE PASS PREMATURELY:**
-   - If the test case contains an ACTION (e.g. "click", "fill", "type", "submit", "select", "search", "log in"), you CANNOT declare "pass" until that action has actually been executed.
-   - Example of a FATAL ERROR: Test says "Click on Pricing and verify pricing plans are shown". Emitting `done: pass` on step 1 just because you see a link called "Pricing" is FALSE. You MUST click the link first, wait for the page to change, verify the pricing plans on the new page, and only THEN call `done: pass`.
+1. NEVER DECLARE PASS PREMATURELY:
+   - If the test case contains an ACTION (e.g. click, fill, type, submit, select, search, log in), you CANNOT declare pass until that action has actually been executed.
+   - Example: Test says "Click on Pricing and verify pricing plans are shown". Emitting done: pass on step 1 just because you see a link called Pricing is invalid. You MUST click the link first, wait for the page to change, verify the pricing plans on the new page, and only THEN call done: pass.
 
-2. **COMPLETING FORMS THOROUGHLY:**
-   - If the test case asks to "fill the form", you must inspect the page and fill ALL available input fields in that form (e.g. First Name, Last Name, Company, Email, Phone/WhatsApp, etc.) step by step.
-   - DO NOT stop after filling only 1 or 2 fields! Continue filling the remaining fields turn by turn.
-   - Only call `done: pass` once all fields specified by the test case (or all fields of the form) have been filled.
-   - If the test case says "submit", you must also click the submit button and check the response.
+2. COMPLETING FORMS THOROUGHLY:
+   - If the test case asks to fill the form, you must inspect the page and fill ALL available input fields in that form (First Name, Last Name, Company, Email, Phone/WhatsApp, etc.) step by step.
+   - DO NOT stop after filling only 1 or 2 fields. Continue filling the remaining fields turn by turn.
+   - Only call done: pass once all fields specified by the test case (or all fields of the form) have been filled.
+   - If the test case says submit, you must also click the submit button and check the response.
 
-3. **VERIFY OUTCOME, NOT JUST INTENT:**
+3. VERIFY OUTCOME, NOT JUST INTENT:
    - Performing an action does not mean it succeeded.
-   - If you just clicked "Submit" or "Log In", do NOT conclude on that turn. On the NEXT turn, check if an error banner appeared (e.g. "Invalid password", "Field required") or if the destination page loaded.
-   - If an error message is shown, the test must be marked `result: "fail"`.
+   - If you just clicked Submit or Log In, do NOT conclude on that turn. On the NEXT turn, check if an error banner appeared or if the destination page loaded.
+   - If an error message is shown, the test must be marked result: fail.
 
-4. **HONEST FAILURES:**
-   - If an expected element, button, or outcome cannot be found after searching: emit `{"action": "done", "params": {"result": "fail", "reason": "Detailed reason why it failed"}}`.
+4. HONEST FAILURES:
+   - If an expected element, button, or outcome cannot be found after searching: emit {"action": "done", "params": {"result": "fail", "reason": "Detailed reason why it failed"}}.
    - Reporting an accurate FAIL is correct and expected. False PASS is unacceptable in QA automation.
 
-5. **CITE CONCRETE EVIDENCE:**
-   - In your `reason` for `done`, cite specific proof: e.g. "All 5 form fields filled: name='kartik', last='test', company='abc', phone='123', email='k@test.com'" or "Page title changed to 'Pricing' and plans Startup, Agency, Enterprise are visible".
+5. CITE CONCRETE EVIDENCE:
+   - In your reason for done, cite specific proof: e.g. "All form fields filled with values" or "Page title changed to Pricing and plans Startup, Agency, Enterprise are visible".
 
 ## Response Format
 
@@ -107,10 +99,7 @@ Always respond with ONLY a JSON object (no markdown fences, no extra text):
 }
 """
 
-
 class AIAgent:
-    """AI agent that interprets test cases and decides browser actions."""
-
     def __init__(self, api_key: str, model: str = "gpt-4o", base_url: str = None, use_vision: bool = True):
         kwargs = {"api_key": api_key}
         if base_url:
@@ -122,21 +111,8 @@ class AIAgent:
         self.use_vision = use_vision
 
     def decide_action(self, test_case: str, page_state: dict, screenshot_b64: str, history: list) -> dict:
-        """
-        Given the current page state and test case, decide the next action.
-
-        Args:
-            test_case: The plain-English test case
-            page_state: Dict with 'url', 'title', 'elements' 
-            screenshot_b64: Base64-encoded PNG screenshot
-            history: List of previous actions taken
-
-        Returns:
-            Dict with 'thought', 'action', 'params'
-        """
         user_prompt = self._build_prompt(test_case, page_state, history)
 
-        # Build message content
         if self.use_vision and screenshot_b64:
             content = [
                 {"type": "text", "text": user_prompt},
@@ -151,7 +127,6 @@ class AIAgent:
         else:
             content = user_prompt
 
-        # Self-contained prompt with full action history to prevent token explosion
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": content}
@@ -161,7 +136,6 @@ class AIAgent:
         return self._parse_response(raw_response)
 
     def _call_llm_with_retry(self, messages: list, user_prompt: str, max_retries: int = 3) -> str:
-        """Call LLM with fallback for vision and retry on rate-limits (TPM/RPM)."""
         for attempt in range(max_retries):
             try:
                 response = self.client.chat.completions.create(
@@ -174,13 +148,11 @@ class AIAgent:
             except Exception as e:
                 err_str = str(e).lower()
 
-                # If vision not supported, switch to text-only DOM immediately
                 if self.use_vision and any(term in err_str for term in ["image", "vision", "multimodal", "content_type", "unsupported", "must be a string", "400"]):
                     self.use_vision = False
                     messages[-1]["content"] = user_prompt
                     continue
 
-                # If rate-limited (413 or 429), wait and retry
                 if any(term in err_str for term in ["413", "429", "rate limit", "too large", "tpm", "rpm"]):
                     if attempt < max_retries - 1:
                         wait_sec = 4 * (attempt + 1)
@@ -193,13 +165,12 @@ class AIAgent:
         raise RuntimeError("Failed to get response from AI after retries")
 
     def _build_prompt(self, test_case: str, page_state: dict, history: list) -> str:
-        """Build the user prompt with current page state and action history."""
         elements_text = self._format_elements(page_state.get("elements", []))
 
         history_text = "None yet."
         if history:
             steps = []
-            for h in history[-8:]:  # Keep last 8 actions
+            for h in history[-8:]:
                 status = "PASS" if h.get("success") else "FAIL"
                 steps.append(f"  Step {h['step']}: {h['action']} {h.get('params', {})} -> {status} ({h.get('message', '')})")
             history_text = "\n".join(steps)
@@ -223,7 +194,6 @@ Review the test case carefully:
 - What is your next single action? Respond with valid JSON only: {{"thought": "...", "action": "...", "params": {{...}}}}"""
 
     def _format_elements(self, elements: list) -> str:
-        """Format elements list into a compact readable string for the AI."""
         if not elements:
             return "(No interactive elements found)"
 
@@ -250,7 +220,6 @@ Review the test case carefully:
         return "\n".join(lines)
 
     def _parse_response(self, raw: str) -> dict:
-        """Parse the AI's JSON response, handling markdown fences or surrounding chatter."""
         cleaned = raw.strip()
         if cleaned.startswith("```"):
             first_newline = cleaned.find("\n")
@@ -260,7 +229,6 @@ Review the test case carefully:
                 cleaned = cleaned[:-3]
             cleaned = cleaned.strip()
 
-        # Direct JSON load
         try:
             parsed = json.loads(cleaned)
             if isinstance(parsed, dict) and "action" in parsed:
@@ -272,7 +240,6 @@ Review the test case carefully:
         except json.JSONDecodeError:
             pass
 
-        # Extract JSON substring
         start = cleaned.find("{")
         end = cleaned.rfind("}") + 1
         if start >= 0 and end > start:
@@ -287,7 +254,6 @@ Review the test case carefully:
             except json.JSONDecodeError:
                 pass
 
-        # Fallback if unparseable
         return {
             "thought": f"Could not parse action from AI response: {raw[:150]}",
             "action": "done",
