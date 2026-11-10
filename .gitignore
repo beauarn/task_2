@@ -1,7 +1,9 @@
 .env
 results/
 build_video/
+build_video_v2/
 build_video.py
+build_custom_video.py
 *.mp4
 *.webm
 *.mp3
