@@ -1,8 +1,6 @@
 .env
 results/
-build_video/
-build_video_v2/
-build_video_v3/
+build_video*/
 build_*.py
 *.mp4
 *.webm
