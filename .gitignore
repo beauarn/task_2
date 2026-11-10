@@ -2,11 +2,12 @@
 results/
 build_video/
 build_video_v2/
-build_video.py
-build_custom_video.py
+build_video_v3/
+build_*.py
 *.mp4
 *.webm
 *.mp3
+*.png
 __pycache__/
 *.pyc
 .venv/

@@ -39,6 +39,13 @@ EXTRACT_ELEMENTS_JS = """
             priority = 2;
         } else if (SEMANTIC_TAGS.has(tag)) {
             priority = 3;
+        } else if (el.querySelectorAll('div, p, section, ul, table, form').length === 0) {
+            const txt = (el.innerText || '').trim();
+            if (txt.length > 0 && txt.length < 80 && (/\\$|€|£|\\b(price|pricing|plan|enterprise|cost|free)\\b/i.test(txt))) {
+                priority = 2;
+            } else {
+                continue;
+            }
         } else {
             continue;
         }
